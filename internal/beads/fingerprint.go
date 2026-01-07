@@ -13,32 +13,31 @@ import (
 
 // ComputeRepoID generates a unique identifier for this git repository
 func ComputeRepoID() (string, error) {
-	cmd := exec.Command("git", "config", "--get", "remote.origin.url")
-	output, err := cmd.Output()
+	repoURL, err := getRepoIDRemoteURL()
 	if err != nil {
-		cmd = exec.Command("git", "rev-parse", "--show-toplevel")
-		output, err = cmd.Output()
+		// Fall back to local path fingerprint for non-git directories or repos without remotes.
+		cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+		output, err := cmd.Output()
 		if err != nil {
 			return "", fmt.Errorf("not a git repository")
 		}
-		
+
 		repoPath := strings.TrimSpace(string(output))
 		absPath, err := filepath.Abs(repoPath)
 		if err != nil {
 			absPath = repoPath
 		}
-		
+
 		evalPath, err := filepath.EvalSymlinks(absPath)
 		if err != nil {
 			evalPath = absPath
 		}
-		
+
 		normalized := filepath.ToSlash(evalPath)
 		hash := sha256.Sum256([]byte(normalized))
 		return hex.EncodeToString(hash[:16]), nil
 	}
 
-	repoURL := strings.TrimSpace(string(output))
 	canonical, err := canonicalizeGitURL(repoURL)
 	if err != nil {
 		return "", fmt.Errorf("failed to canonicalize URL: %w", err)
@@ -46,6 +45,23 @@ func ComputeRepoID() (string, error) {
 
 	hash := sha256.Sum256([]byte(canonical))
 	return hex.EncodeToString(hash[:16]), nil
+}
+
+func getRepoIDRemoteURL() (string, error) {
+	// Prefer upstream in contributor/fork setups. Origin often points at a personal fork,
+	// while upstream is the shared canonical remote across clones.
+	for _, key := range []string{"remote.upstream.url", "remote.origin.url"} {
+		cmd := exec.Command("git", "config", "--get", key) //nolint:gosec // G204: key is from a fixed allowlist
+		output, err := cmd.Output()
+		if err != nil {
+			continue
+		}
+		remoteURL := strings.TrimSpace(string(output))
+		if remoteURL != "" {
+			return remoteURL, nil
+		}
+	}
+	return "", fmt.Errorf("no git remote URL found")
 }
 
 func canonicalizeGitURL(rawURL string) (string, error) {
