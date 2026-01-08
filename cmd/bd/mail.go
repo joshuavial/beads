@@ -1,12 +1,17 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/beads/internal/beads"
+	"github.com/steveyegge/beads/internal/config"
+	"github.com/steveyegge/beads/internal/storage/sqlite"
 )
 
 // mailCmd delegates to an external mail provider.
@@ -96,15 +101,53 @@ func findMailDelegate() string {
 		return delegate
 	}
 
-	// Check bd config (requires database)
-	// This works even without a database connection since we use direct mode
+	// Check config.yaml / BD_* env vars via viper
+	if delegate := strings.TrimSpace(config.GetString("mail.delegate")); delegate != "" {
+		return delegate
+	}
+
+	// Check bd config (SQLite)
 	if store != nil {
 		if delegate, err := store.GetConfig(rootCtx, "mail.delegate"); err == nil && delegate != "" {
 			return delegate
 		}
+		return ""
 	}
 
-	return ""
+	// Store isn't initialized (e.g., DisableFlagParsing). Open SQLite directly to read config.
+	ctx := rootCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	db := dbPath
+	if db == "" {
+		db = strings.TrimSpace(config.GetString("db"))
+	}
+	if db == "" {
+		db = beads.FindDatabasePath()
+	}
+	if db == "" {
+		if beadsDir := beads.FindBeadsDir(); beadsDir != "" {
+			db = filepath.Join(beadsDir, beads.CanonicalDatabaseName)
+		}
+	}
+	if db == "" {
+		return ""
+	}
+
+	roStore, err := sqlite.NewReadOnly(ctx, db)
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = roStore.Close() }()
+
+	delegate, err := roStore.GetConfig(ctx, "mail.delegate")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(delegate)
+
 }
 
 func init() {
