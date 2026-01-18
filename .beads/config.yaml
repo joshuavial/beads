@@ -44,6 +44,11 @@ issue-prefix: "bd"
 # Can also be set via BEADS_SYNC_BRANCH environment variable.
 sync-branch: "beads-sync"
 
+# Custom issue types for Gas Town (agent, convoy, etc.)
+# IMPORTANT: Must be in config.yaml for multi-repo hydration to work
+# If upstream has custom-type issues, set this BEFORE initializing database
+types.custom: "agent,role,rig,convoy,slot"
+
 # Integration settings (access with 'bd config get/set')
 # These are stored in the database, not in this file:
 # - jira.url
